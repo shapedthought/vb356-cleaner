@@ -4,7 +4,7 @@ This script is designed to remove either M365 SharePoint or Teams sites that hav
 
 It does this by looking at the current Teams and SharePoint sites in the M365 environment and comparing them to what is in the backup jobs. If it finds a site that is in the backup job but not in the M365 environment it will remove it from the backup job.
 
-If it finds that the job only has that item in it, it will remove the job instead, but only if the `delete_jobs` option is set to `true` in the config file.
+If it finds that the job only has that item in it, it will disable the job, you can then manually remove the job if you wish.
 
 Note that this still needs further testing, use at your own risk.
 
@@ -15,8 +15,7 @@ You will need a config.json file with the following:
 ```json
 {
   "username": "administrator@yourdomain.com",
-  "vb365_address": "192.168.0.123",
-  "delete_jobs": true
+  "vb365_address": "192.168.0.123"
 }
 ```
 
