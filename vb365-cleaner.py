@@ -60,10 +60,6 @@ def main(dry_run, save):
         logging.error("vb365_address not set in config.json")
         sys.exit(1)
 
-    delete_jobs = config["delete_jobs"]
-    if delete_jobs == None:
-        logging.error("delete_jobs not set in config.json")
-        sys.exit(1)
     vec = VeeamEasyConnect(username, password, False)
 
     vec.o365().update_api_version("v7")
