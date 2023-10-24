@@ -8,6 +8,10 @@ If it finds that the job only has that item in it, it will disable the job, you 
 
 Note that this still needs further testing, use at your own risk.
 
+UPDATE: 24/10/2023
+
+Changes have been made so this no longer uses restore points as the reference for currently protected items. This has been moved to the job itself as that tracks the items even if there hasn't been a successful backup.
+
 ## Usage
 
 You will need a config.json file with the following:
