@@ -132,121 +132,6 @@ def main(dry_run, save):
         save_json(all_teams, "all_teams.json")
         save_json(all_sites, "all_sites.json")
 
-    now = datetime.now()
-    yesterday = now - timedelta(days=1)
-    yesterday_iso = yesterday.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # get all the restore points from yesterday
-    try:
-        restore_points = vec.get(f"RestorePoints?from={yesterday_iso}", False)
-    except:
-        logging.error("Error getting restore points")
-        sys.exit(1)
-
-    if save == True:
-        save_json(restore_points, "restore_points.json")
-
-    job_ids = [x["jobId"] for x in restore_points["results"]]
-    job_ids = list(set(job_ids))
-
-    restore_points_filtered = []
-
-    for i in job_ids:
-        temp = []
-        for x in restore_points["results"]:
-            if i == x["jobId"]:
-                temp.append(x)
-        restore_points_filtered.append(temp[0])
-
-    restore_points = {"results": restore_points_filtered}
-
-    protected_sites = []
-    protected_teams = []
-    sub_string = "/v7"
-
-    # get all the protected sites and teams from the restore points
-    # doing it this way means that I don't have filter the protected sites/teams
-    logging.info("Getting protected sites and teams")
-    for point in restore_points["results"]:
-        if point["isSharePoint"] == True:
-            url = point["_links"]["protectedSites"]["href"]
-            url = url.replace(sub_string, "")
-            try:
-                ps = vec.get(url, False)
-            except:
-                logging.error(
-                    f"Error getting protected sites for restore point {point['id']} in job {point['jobId']}"
-                )
-                sys.exit(1)
-            data = {
-                "point_id": point["id"],
-                "backup_time": point["backupTime"],
-                "protected_sites": ps,
-            }
-            protected_sites.append(data)
-        if point["isTeams"] == True:
-            url = point["_links"]["protectedTeams"]["href"]
-            url = url.replace(sub_string, "")
-            try:
-                pt = vec.get(url, False)
-            except:
-                logging.error(
-                    f"Error getting protected teams for {point['id']} in job {point['jobId']}"
-                )
-                sys.exit(1)
-            data = {
-                "point_id": point["id"],
-                "backup_time": point["backupTime"],
-                "protected_teams": pt,
-            }
-            protected_teams.append(data)
-        logging.info(
-            f"Got protected sites and teams for {point['id']} in job {point['jobId']}"
-        )
-
-    if save == True:
-        save_json(protected_sites, "protected_sites.json")
-        save_json(protected_teams, "protected_teams.json")
-
-    # get all the site and team ids from all the sites/teams as well as the protected sites/teams
-    logging.info("Checking for sites and teams to remove")
-    site_ids = []
-
-    for x in all_sites:
-        for y in x["sites"]["results"]:
-            site_ids.append(y["id"])
-
-    protected_site_ids = [
-        y["siteId"] for x in protected_sites for y in x["protected_sites"]["results"]
-    ]
-    teams_ids = []
-
-    for x in all_teams:
-        for y in x["teams"]["results"]:
-            teams_ids.append(y["id"])
-
-    protected_teams_ids = [
-        y["id"] for x in protected_teams for y in x["protected_teams"]["results"]
-    ]
-
-    sites_to_remove = []
-
-    # check if the site id is in the M365 environment
-    for i in protected_site_ids:
-        if i not in site_ids:
-            sites_to_remove.append(i)
-
-    teams_to_remove = []
-
-    # check if the team id is in the M365 environment
-    for i in protected_teams_ids:
-        if i not in teams_ids:
-            teams_to_remove.append(i)
-
-    if len(sites_to_remove) == 0 and len(teams_to_remove) == 0:
-        logging.info("No teams or sites to remove, exiting")
-        sys.exit(1)
-
     # get the jobs
     logging.info("Getting job data")
     try:
@@ -257,7 +142,8 @@ def main(dry_run, save):
     else:
         logging.info("Got jobs OK")
 
-    backup_job_items = []
+    protected_teams = []
+    protected_sites = []
 
     # for each job get the selected items
     logging.info("Getting selected items from jobs")
@@ -270,75 +156,62 @@ def main(dry_run, save):
             sys.exit(1)
         else:
             logging.info(f"Got selected items from job {j['id']}")
-        filter = []
         for i in res:
-            if i["type"] == "Site" and i["site"]["id"] in sites_to_remove:
-                filter.append(i)
-            if i["type"] == "Team" and i["team"]["id"] in teams_to_remove:
-                filter.append(i)
-        if len(filter) == 0:
-            continue
-        data = {"job_name": j["name"], "job_id": j["id"], "items": filter}
-        backup_job_items.append(data)
+            if i["type"] == "Site":
+                i["job_name"] = j["name"]
+                i["job_id"] = j["id"]
+                protected_sites.append(i)
+            if i["type"] == "Team":
+                i["job_name"] = j["name"]
+                i["job_id"] = j["id"]
+                i["team_name"] = i["team"]["displayName"]
+                protected_teams.append(i)
 
     if save == True:
-        save_json(backup_job_items, "backup_job_items.json")
+        save_json(protected_sites, "protected_sites.json")
+        save_json(protected_teams, "protected_teams.json")
+
+    # get all the site and team ids from all the sites/teams as well as the protected sites/teams
+    logging.info("Checking for sites and teams to remove")
 
     site_delete_info = []
     teams_delete_info = []
 
-    # loop through the sites to remove and the backup job items
-    for i in sites_to_remove:
-        for b in backup_job_items:
-            for t in b["items"]:
-                if t["type"] == "Site":
-                    if i == t["site"]["id"]:
-                        data = {
-                            "job_name": b["job_name"],
-                            "job_id": b["job_id"],
-                            "site_id": t["id"],
-                        }
-                        site_delete_info.append(data)
+    # check if the site id is in the M365 environment
+    for i in protected_sites:
+        found = False
+        for j in all_sites:
+            for k in j["sites"]["results"]:
+                if i["site"]["id"] == k["id"]:
+                    found = True
+                    break
+        if found == False:
+            site_delete_info.append(i)
 
-    for i in teams_to_remove:
-        for b in backup_job_items:
-            for t in b["items"]:
-                if t["type"] == "Team":
-                    if i == t["team"]["id"]:
-                        data = {
-                            "job_name": b["job_name"],
-                            "job_id": b["job_id"],
-                            "team_id": t["id"],
-                        }
-                        teams_delete_info.append(data)
+    for i in protected_teams:
+        found = False
+        for j in all_teams:
+            for k in j["teams"]["results"]:
+                if i["team"]["id"] == k["id"]:
+                    found = True
+                    break
+        if found == False:
+            teams_delete_info.append(i)
 
-    teams_seen = set()
-    teams_delete_info = [
-        x
-        for x in teams_delete_info
-        if x["team_id"] not in teams_seen and not teams_seen.add(x["team_id"])
-    ]
-    sites_seen = set()
-    site_delete_info = [
-        x
-        for x in site_delete_info
-        if x["site_id"] not in sites_seen and not sites_seen.add(x["site_id"])
-    ]
+    if len(site_delete_info) == 0 and len(teams_delete_info) == 0:
+        logging.info("No teams or sites to remove, exiting")
+        sys.exit(1)
 
-    if len(site_delete_info) == 0:
-        logging.info("No sites to delete")
-    else:
+    if len(site_delete_info) > 0:
         for i in site_delete_info:
             logging.info(
-                f"Site {i['site_id']} in job {i['job_name']} will be removed from job"
+                f"Site {i['site']['name']}, id: {i['site']['id']} is not in the M365 environment"
             )
 
-    if len(teams_delete_info) == 0:
-        logging.info("No teams to delete")
-    else:
+    if len(teams_delete_info) > 0:
         for i in teams_delete_info:
             logging.info(
-                f"Team {i['team_id']} in job {i['job_name']} will be removed from job"
+                f"Team {i['team_name']}, id: {i['team']['id']} is not in the M365 environment"
             )
 
     if dry_run == True:
@@ -347,76 +220,98 @@ def main(dry_run, save):
 
     auth_headers = vec.get_request_header()
 
+    sub_string = "/v7/"
+
     if len(site_delete_info) > 0:
         logging.info("Deleting sites that are no longer in the M365 environment")
         for i in site_delete_info:
-            current_job_data = vec.get(f"jobs/{i['job_id']}", False)
+            job_id = i["job_id"]
+            job_name = i["job_name"]
+            veeam_site_id = i["id"]
+            site_id = i["site"]["id"]
+            site_name = i["site"]["name"]
+            current_job_data = vec.get(f"jobs/{job_id}", False)
             url = current_job_data["_links"]["selectedItems"]["href"]
             url = url.replace(sub_string, "")
             selected_items = vec.get(url, False)
             if len(selected_items) == 1:
                 try:
                     port = vec.get_port()
-                    url = f"https://{address}:{port}/{api_version}/jobs/{i['team_id']}/disable"
+                    url = (
+                        f"https://{address}:{port}/{api_version}/jobs/{job_id}/disable"
+                    )
                     res = requests.post(url, headers=auth_headers, verify=False)
                 except:
                     logging.error(
-                        f"Error disabling job {i['job_id']} for site {i['site_id']}"
+                        f"Error disabling job {job_name}, id: {job_id} for site {site_name}, id: {site_id}"
                     )
                     sys.exit(1)
                 logging.info(
-                    f"Job {i['job_name']} only has one item, it has been disabled, job will need to be manually deleted"
+                    f"Job {job_name} only has one item, it has been disabled, job will need to be manually deleted"
                 )
                 continue
             else:
-                logging.info(f"Deleting site {i['site_id']} from job {i['job_name']}")
+                logging.info(
+                    f"Deleting site {site_name}, id: {site_id} from job {job_name}, id: {job_id}"
+                )
                 address = vec.address
                 port = vec.get_port()
                 api_version = vec.get_api_version()
-                url = f"https://{address}:{port}/{api_version}/jobs/{i['job_id']}/SelectedItems?ids={i['site_id']}"
+                url = f"https://{address}:{port}/{api_version}/jobs/{job_id}/SelectedItems?ids={veeam_site_id}"
+                logging.info(f"Sending delete request to {url}")
                 res = requests.delete(url, headers=auth_headers, verify=False)
                 if res.status_code != 204:
-                    logging.error(f"Error deleting site {i['site_id']}")
+                    logging.error(f"Error deleting site {site_name}, id: {site_id}")
                     logging.error(res.text)
                     sys.exit(1)
                 else:
-                    logging.info(f"Deleted site {i['site_id']}")
+                    logging.info(f"Deleted site {site_name}, id: {site_id}")
 
     if len(teams_delete_info) > 0:
         logging.info("Deleting teams that are no longer in the M365 environment")
         for i in teams_delete_info:
-            current_job_data = vec.get(f"jobs/{i['job_id']}", False)
+            job_id = i["job_id"]
+            job_name = i["job_name"]
+            veeam_team_id = i["id"]
+            team_id = i["team"]["id"]
+            team_name = i["team_name"]
+            current_job_data = vec.get(f"jobs/{job_id}", False)
             url = current_job_data["_links"]["selectedItems"]["href"]
             url = url.replace(sub_string, "")
             selected_items = vec.get(url, False)
             if len(selected_items) == 1:
                 try:
                     port = vec.get_port()
-                    url = f"https://{address}:{port}/{api_version}/jobs/{i['team_id']}/disable"
+                    url = (
+                        f"https://{address}:{port}/{api_version}/jobs/{job_id}/disable"
+                    )
                     res = requests.post(url, headers=auth_headers, verify=False)
                 except Exception as e:
                     logging.error(
-                        f"Error disabling job {i['job_id']} for site {i['team_id']}"
+                        f"Error disabling job {job_name}, id: {job_id} for team {team_name}, id {team_id}"
                     )
                     logging.error(e)
                     sys.exit(1)
                 logging.info(
-                    f"Job {i['job_name']} only has one item, it has been disabled, job will need to be manually deleted"
+                    f"Job id {job_id} only has one item, it has been disabled, job will need to be manually deleted"
                 )
                 continue
             else:
-                logging.info(f"Deleting team {i['team_id']} from job {i['job_name']}")
+                logging.info(
+                    f"Deleting team {team_name}, id: {team_id} from job {job_name}, id: {job_id}"
+                )
                 address = vec.address
                 port = vec.get_port()
                 api_version = vec.get_api_version()
-                url = f"https://{address}:{port}/{api_version}/jobs/{i['job_id']}/SelectedItems?ids={i['team_id']}"
+                url = f"https://{address}:{port}/{api_version}/jobs/{job_id}/SelectedItems?ids={veeam_team_id}"
+                logging.info(f"Sending delete request to {url}")
                 res = requests.delete(url, headers=auth_headers, verify=False)
                 if res.status_code != 204:
-                    logging.error(f"Error deleting team {i['team_id']}")
+                    logging.error(f"Error deleting team {team_name}, id: {team_id}")
                     logging.error(res.text)
                     sys.exit(1)
                 else:
-                    logging.info(f"Deleted team {i['team_id']}")
+                    logging.info(f"Deleted team {team_name}, id: {team_id}")
 
 
 if __name__ == "__main__":
