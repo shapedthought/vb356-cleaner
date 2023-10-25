@@ -2,3 +2,5 @@
 /virt
 app.log
 config.json
+*.json
+*.ipynb

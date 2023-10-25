@@ -1,7 +1,6 @@
 import json
 import os
 import sys
-from datetime import datetime, timedelta
 from veeam_easy_connect import VeeamEasyConnect
 import requests
 import urllib3
@@ -210,9 +209,9 @@ def main(dry_run, save):
                 f"Team {i['team_name']}, id: {i['team']['id']} is not in the M365 environment"
             )
 
-    if dry_run == True:
-        logging.info("Dry run enabled, exiting")
-        sys.exit(1)
+    if save == True:
+        save_json(site_delete_info, "site_to_delete.json")
+        save_json(teams_delete_info, "teams_to_delete.json")
 
     auth_headers = vec.get_request_header()
 
@@ -231,20 +230,25 @@ def main(dry_run, save):
             url = url.replace(sub_string, "")
             selected_items = vec.get(url, False)
             if len(selected_items) == 1:
+                logging.info(
+                    f"Job {job_name} only has one item, it will be disabled, job will need to be manually deleted"
+                )
                 try:
                     port = vec.get_port()
                     url = (
                         f"https://{address}:{port}/{api_version}/jobs/{job_id}/disable"
                     )
-                    res = requests.post(url, headers=auth_headers, verify=False)
+                    if dry_run == True:
+                        logging.info(f"Dry run, not disabling job {job_name}")
+                    else:
+                        logging.info(f"Sending disable request to {url}")
+                        res = requests.post(url, headers=auth_headers, verify=False)
                 except:
                     logging.error(
                         f"Error disabling job {job_name}, id: {job_id} for site {site_name}, id: {site_id}"
                     )
                     sys.exit(1)
-                logging.info(
-                    f"Job {job_name} only has one item, it has been disabled, job will need to be manually deleted"
-                )
+
                 continue
             else:
                 logging.info(
@@ -255,7 +259,11 @@ def main(dry_run, save):
                 api_version = vec.get_api_version()
                 url = f"https://{address}:{port}/{api_version}/jobs/{job_id}/SelectedItems?ids={veeam_site_id}"
                 logging.info(f"Sending delete request to {url}")
-                res = requests.delete(url, headers=auth_headers, verify=False)
+                if dry_run == True:
+                    logging.info(f"Dry run, not deleting site {site_name}")
+                else:
+                    logging.info(f"Sending delete request to {url}")
+                    res = requests.delete(url, headers=auth_headers, verify=False)
                 if res.status_code != 204:
                     logging.error(f"Error deleting site {site_name}, id: {site_id}")
                     logging.error(res.text)
@@ -276,21 +284,26 @@ def main(dry_run, save):
             url = url.replace(sub_string, "")
             selected_items = vec.get(url, False)
             if len(selected_items) == 1:
+                logging.info(
+                    f"Job id {job_id} only has one item, it will be disabled, job will need to be manually deleted"
+                )
                 try:
                     port = vec.get_port()
                     url = (
                         f"https://{address}:{port}/{api_version}/jobs/{job_id}/disable"
                     )
-                    res = requests.post(url, headers=auth_headers, verify=False)
+                    if dry_run == True:
+                        logging.info(f"Dry run, not disabling job {job_name}")
+                    else:
+                        logging.info(f"Sending disable request to {url}")
+                        res = requests.post(url, headers=auth_headers, verify=False)
                 except Exception as e:
                     logging.error(
                         f"Error disabling job {job_name}, id: {job_id} for team {team_name}, id {team_id}"
                     )
                     logging.error(e)
                     sys.exit(1)
-                logging.info(
-                    f"Job id {job_id} only has one item, it has been disabled, job will need to be manually deleted"
-                )
+
                 continue
             else:
                 logging.info(
@@ -301,6 +314,11 @@ def main(dry_run, save):
                 api_version = vec.get_api_version()
                 url = f"https://{address}:{port}/{api_version}/jobs/{job_id}/SelectedItems?ids={veeam_team_id}"
                 logging.info(f"Sending delete request to {url}")
+                if dry_run == True:
+                    logging.info(f"Dry run, not deleting team {team_name}")
+                    continue
+                else:
+                    logging.info(f"Sending delete request to {url}")
                 res = requests.delete(url, headers=auth_headers, verify=False)
                 if res.status_code != 204:
                     logging.error(f"Error deleting team {team_name}, id: {team_id}")
