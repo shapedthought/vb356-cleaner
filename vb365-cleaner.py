@@ -27,6 +27,94 @@ def save_json(data, file_name):
     with open(file_name, "w") as outfile:
         json.dump(data, outfile)
 
+def job_updater(dry_run, address, vec, api_version, site_delete_info, auth_headers, sub_string, data_type):
+    if len(site_delete_info) > 0:
+        logging.info("Deleting sites that are no longer in the M365 environment")
+        for i in site_delete_info:
+            job_id = i["job_id"]
+            job_name = i["job_name"]
+            veeam_site_id = i["id"]
+            if data_type == "site":
+                data_id = i["site"]["id"]
+                data_name = i["site"]["name"]
+            elif data_type == "team":
+                data_id = i["team"]["id"]
+                data_name = i["team"]["name"]
+            current_job_data = vec.get(f"jobs/{job_id}", False)
+            url = current_job_data["_links"]["selectedItems"]["href"]
+            url = url.replace(sub_string, "")
+            selected_items = vec.get(url, False)
+            if len(selected_items) == 1:
+                logging.info(
+                    f"Job {job_name} only has one item, it will be disabled, job will need to be manually deleted"
+                )
+                try:
+                    port = vec.get_port()
+                    url = (
+                        f"https://{address}:{port}/{api_version}/jobs/{job_id}/disable"
+                    )
+                    if dry_run == True:
+                        logging.info(f"Dry run, not disabling job {job_name}")
+                    else:
+                        logging.info(f"Sending disable request to {url}")
+                        res = requests.post(url, headers=auth_headers, verify=False)
+                except:
+                    if data_type == "site":
+                        logging.error(
+                                f"Error disabling job {job_name}, id: {job_id} for site {data_name}, id: {data_id}"      
+                        )
+                    else:
+                        logging.error(
+                                f"Error disabling job {job_name}, id: {job_id} for team {data_name}, id: {data_name}"      
+                        )
+                    sys.exit(1)
+            else:
+                if data_type == "site":
+                    logging.info(
+                        f"Deleting site {data_name}, id: {data_id} from job {job_name}, id: {job_id}"
+                    )
+                else:
+                    logging.info(
+                        f"Deleting team {data_name}, id: {data_id} from job {job_name}, id: {job_id}"
+                    )
+                address = vec.address
+                port = vec.get_port()
+                api_version = vec.get_api_version()
+                url = f"https://{address}:{port}/{api_version}/jobs/{job_id}/SelectedItems?ids={veeam_site_id}"
+                logging.info(f"Sending delete request to {url}")
+                if dry_run == True:
+                    if data_type == "site":
+                        logging.info(f"Dry run, not deleting site {data_name}")
+                    else: 
+                        logging.info(f"Dry run, not deleting team {data_name}")
+                else:
+                    logging.info(f"Sending delete request to {url}")
+                    res = requests.delete(url, headers=auth_headers, verify=False)
+                if res.status_code != 204:
+                    if data_type == "site":
+                        logging.error(f"Error deleting site {data_name}, id: {data_id}")
+                    else:
+                        logging.error(f"Error deleting team {data_name}, id: {data_id}")
+                    logging.error(res.text)
+                    sys.exit(1)
+                else:
+                    if data_type == "site":
+                        logging.info(f"Deleted site {data_name}, id: {data_id}")
+                    else:
+                        logging.info(f"Deleted team {data_name}, id: {data_id}")
+
+def item_checker(all_sites, protected_items, data_type):
+    deleted_info = []
+    for i in protected_items:
+        found = False
+        for j in all_sites:
+            for k in j[f"{data_type}"]["results"]:
+                if i["site"]["id"] == k["id"]:
+                    found = True
+                    break
+        if found == False:
+            deleted_info.append(i)
+    return deleted_info
 
 @click.command()
 @click.option(
@@ -169,29 +257,11 @@ def main(dry_run, save):
     # get all the site and team ids from all the sites/teams as well as the protected sites/teams
     logging.info("Checking for sites and teams to remove")
 
-    site_delete_info = []
-    teams_delete_info = []
-
     # check if the site id is in the M365 environment
-    for i in protected_sites:
-        found = False
-        for j in all_sites:
-            for k in j["sites"]["results"]:
-                if i["site"]["id"] == k["id"]:
-                    found = True
-                    break
-        if found == False:
-            site_delete_info.append(i)
+    site_delete_info = item_checker(all_sites, protected_sites, "sites")
 
-    for i in protected_teams:
-        found = False
-        for j in all_teams:
-            for k in j["teams"]["results"]:
-                if i["team"]["id"] == k["id"]:
-                    found = True
-                    break
-        if found == False:
-            teams_delete_info.append(i)
+    # check if the team id is in the M365 environment
+    teams_delete_info = item_checker(all_teams, protected_teams, "teams")
 
     if len(site_delete_info) == 0 and len(teams_delete_info) == 0:
         logging.info("No teams or sites to remove, exiting")
@@ -217,116 +287,13 @@ def main(dry_run, save):
 
     sub_string = "/v7/"
 
-    if len(site_delete_info) > 0:
-        logging.info("Deleting sites that are no longer in the M365 environment")
-        for i in site_delete_info:
-            job_id = i["job_id"]
-            job_name = i["job_name"]
-            veeam_site_id = i["id"]
-            site_id = i["site"]["id"]
-            site_name = i["site"]["name"]
-            current_job_data = vec.get(f"jobs/{job_id}", False)
-            url = current_job_data["_links"]["selectedItems"]["href"]
-            url = url.replace(sub_string, "")
-            selected_items = vec.get(url, False)
-            if len(selected_items) == 1:
-                logging.info(
-                    f"Job {job_name} only has one item, it will be disabled, job will need to be manually deleted"
-                )
-                try:
-                    port = vec.get_port()
-                    url = (
-                        f"https://{address}:{port}/{api_version}/jobs/{job_id}/disable"
-                    )
-                    if dry_run == True:
-                        logging.info(f"Dry run, not disabling job {job_name}")
-                    else:
-                        logging.info(f"Sending disable request to {url}")
-                        res = requests.post(url, headers=auth_headers, verify=False)
-                except:
-                    logging.error(
-                        f"Error disabling job {job_name}, id: {job_id} for site {site_name}, id: {site_id}"
-                    )
-                    sys.exit(1)
+    # For sites
+    job_updater(dry_run, address, vec, api_version, site_delete_info, auth_headers, sub_string, "site")
 
-                continue
-            else:
-                logging.info(
-                    f"Deleting site {site_name}, id: {site_id} from job {job_name}, id: {job_id}"
-                )
-                address = vec.address
-                port = vec.get_port()
-                api_version = vec.get_api_version()
-                url = f"https://{address}:{port}/{api_version}/jobs/{job_id}/SelectedItems?ids={veeam_site_id}"
-                logging.info(f"Sending delete request to {url}")
-                if dry_run == True:
-                    logging.info(f"Dry run, not deleting site {site_name}")
-                else:
-                    logging.info(f"Sending delete request to {url}")
-                    res = requests.delete(url, headers=auth_headers, verify=False)
-                if res.status_code != 204:
-                    logging.error(f"Error deleting site {site_name}, id: {site_id}")
-                    logging.error(res.text)
-                    sys.exit(1)
-                else:
-                    logging.info(f"Deleted site {site_name}, id: {site_id}")
+    # For teams
+    job_updater(dry_run, address, vec, api_version, teams_delete_info, auth_headers, sub_string, "team")
 
-    if len(teams_delete_info) > 0:
-        logging.info("Deleting teams that are no longer in the M365 environment")
-        for i in teams_delete_info:
-            job_id = i["job_id"]
-            job_name = i["job_name"]
-            veeam_team_id = i["id"]
-            team_id = i["team"]["id"]
-            team_name = i["team_name"]
-            current_job_data = vec.get(f"jobs/{job_id}", False)
-            url = current_job_data["_links"]["selectedItems"]["href"]
-            url = url.replace(sub_string, "")
-            selected_items = vec.get(url, False)
-            if len(selected_items) == 1:
-                logging.info(
-                    f"Job id {job_id} only has one item, it will be disabled, job will need to be manually deleted"
-                )
-                try:
-                    port = vec.get_port()
-                    url = (
-                        f"https://{address}:{port}/{api_version}/jobs/{job_id}/disable"
-                    )
-                    if dry_run == True:
-                        logging.info(f"Dry run, not disabling job {job_name}")
-                    else:
-                        logging.info(f"Sending disable request to {url}")
-                        res = requests.post(url, headers=auth_headers, verify=False)
-                except Exception as e:
-                    logging.error(
-                        f"Error disabling job {job_name}, id: {job_id} for team {team_name}, id {team_id}"
-                    )
-                    logging.error(e)
-                    sys.exit(1)
-
-                continue
-            else:
-                logging.info(
-                    f"Deleting team {team_name}, id: {team_id} from job {job_name}, id: {job_id}"
-                )
-                address = vec.address
-                port = vec.get_port()
-                api_version = vec.get_api_version()
-                url = f"https://{address}:{port}/{api_version}/jobs/{job_id}/SelectedItems?ids={veeam_team_id}"
-                logging.info(f"Sending delete request to {url}")
-                if dry_run == True:
-                    logging.info(f"Dry run, not deleting team {team_name}")
-                    continue
-                else:
-                    logging.info(f"Sending delete request to {url}")
-                res = requests.delete(url, headers=auth_headers, verify=False)
-                if res.status_code != 204:
-                    logging.error(f"Error deleting team {team_name}, id: {team_id}")
-                    logging.error(res.text)
-                    sys.exit(1)
-                else:
-                    logging.info(f"Deleted team {team_name}, id: {team_id}")
-
+    logging.info("Done")
 
 if __name__ == "__main__":
     main()
