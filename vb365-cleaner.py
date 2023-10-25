@@ -105,11 +105,12 @@ def job_updater(dry_run, address, vec, api_version, site_delete_info, auth_heade
 
 def item_checker(all_sites, protected_items, data_type):
     deleted_info = []
+    other_type = "site" if data_type == "sites" else "team"
     for i in protected_items:
         found = False
         for j in all_sites:
             for k in j[f"{data_type}"]["results"]:
-                if i["site"]["id"] == k["id"]:
+                if i[f"{other_type}"]["id"] == k["id"]:
                     found = True
                     break
         if found == False:
