@@ -27,10 +27,21 @@ def save_json(data, file_name):
     with open(file_name, "w") as outfile:
         json.dump(data, outfile)
 
-def job_updater(dry_run, address, vec, api_version, site_delete_info, auth_headers, sub_string, data_type):
-    if len(site_delete_info) > 0:
-        logging.info("Deleting sites that are no longer in the M365 environment")
-        for i in site_delete_info:
+
+def job_updater(
+    dry_run,
+    address,
+    vec,
+    api_version,
+    delete_info,
+    auth_headers,
+    sub_string,
+    data_type,
+):
+    if len(delete_info) > 0:
+        dt = "sites" if data_type == "site" else "teams"
+        logging.info(f"Deleting {dt} that are no longer in the M365 environment")
+        for i in delete_info:
             job_id = i["job_id"]
             job_name = i["job_name"]
             veeam_site_id = i["id"]
@@ -39,7 +50,7 @@ def job_updater(dry_run, address, vec, api_version, site_delete_info, auth_heade
                 data_name = i["site"]["name"]
             elif data_type == "team":
                 data_id = i["team"]["id"]
-                data_name = i["team"]["name"]
+                data_name = i["team"]["displayName"]
             current_job_data = vec.get(f"jobs/{job_id}", False)
             url = current_job_data["_links"]["selectedItems"]["href"]
             url = url.replace(sub_string, "")
@@ -61,11 +72,11 @@ def job_updater(dry_run, address, vec, api_version, site_delete_info, auth_heade
                 except:
                     if data_type == "site":
                         logging.error(
-                                f"Error disabling job {job_name}, id: {job_id} for site {data_name}, id: {data_id}"      
+                            f"Error disabling job {job_name}, id: {job_id} for site {data_name}, id: {data_id}"
                         )
                     else:
                         logging.error(
-                                f"Error disabling job {job_name}, id: {job_id} for team {data_name}, id: {data_name}"      
+                            f"Error disabling job {job_name}, id: {job_id} for team {data_name}, id: {data_name}"
                         )
                     sys.exit(1)
             else:
@@ -81,11 +92,10 @@ def job_updater(dry_run, address, vec, api_version, site_delete_info, auth_heade
                 port = vec.get_port()
                 api_version = vec.get_api_version()
                 url = f"https://{address}:{port}/{api_version}/jobs/{job_id}/SelectedItems?ids={veeam_site_id}"
-                logging.info(f"Sending delete request to {url}")
                 if dry_run == True:
                     if data_type == "site":
                         logging.info(f"Dry run, not deleting site {data_name}")
-                    else: 
+                    else:
                         logging.info(f"Dry run, not deleting team {data_name}")
                 else:
                     logging.info(f"Sending delete request to {url}")
@@ -103,6 +113,7 @@ def job_updater(dry_run, address, vec, api_version, site_delete_info, auth_heade
                     else:
                         logging.info(f"Deleted team {data_name}, id: {data_id}")
 
+
 def item_checker(all_sites, protected_items, data_type):
     deleted_info = []
     other_type = "site" if data_type == "sites" else "team"
@@ -116,6 +127,7 @@ def item_checker(all_sites, protected_items, data_type):
         if found == False:
             deleted_info.append(i)
     return deleted_info
+
 
 @click.command()
 @click.option(
@@ -289,12 +301,31 @@ def main(dry_run, save):
     sub_string = "/v7/"
 
     # For sites
-    job_updater(dry_run, address, vec, api_version, site_delete_info, auth_headers, sub_string, "site")
+    job_updater(
+        dry_run,
+        address,
+        vec,
+        api_version,
+        site_delete_info,
+        auth_headers,
+        sub_string,
+        "site",
+    )
 
     # For teams
-    job_updater(dry_run, address, vec, api_version, teams_delete_info, auth_headers, sub_string, "team")
+    job_updater(
+        dry_run,
+        address,
+        vec,
+        api_version,
+        teams_delete_info,
+        auth_headers,
+        sub_string,
+        "team",
+    )
 
     logging.info("Done")
+
 
 if __name__ == "__main__":
     main()
