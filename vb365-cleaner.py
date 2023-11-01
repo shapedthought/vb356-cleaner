@@ -59,6 +59,13 @@ def main(dry_run, save):
         logging.error("vb365_address not set in config.json")
         sys.exit(1)
 
+    sync_mode = config["sync_mode"]
+    if sync_mode == None or sync_mode not in ["PreferLocalResynced", "Production"]:
+        logging.error(
+            "sync_mode not set in config.json or not set to PreferLocalResynced or Production"
+        )
+        sys.exit(1)
+
     vec = VeeamEasyConnect(username, password, False)
 
     vec.o365().update_api_version("v7")
@@ -94,22 +101,25 @@ def main(dry_run, save):
         org_name = org["name"]
         try:
             org_teams = vec.get(
-                f"Organizations/{org_id}/Teams?dataSource=PreferLocalResynced", False
+                f"Organizations/{org_id}/Teams?dataSource={sync_mode}", False
             )
         except:
             logging.error(f"Error getting teams for {org_name}")
             sys.exit(1)
         try:
             org_sites = vec.get(
-                f"Organizations/{org_id}/Sites?dataSource=PreferLocalResynced", False
+                f"Organizations/{org_id}/Sites?dataSource={sync_mode}", False
             )
         except:
             logging.error(f"Error getting sites for {org_name}")
             sys.exit(1)
         temp_sites = []
-        for i in org_sites["results"]:
-            if i["isAvailable"] == True:
-                temp_sites.append(i)
+        if config["remove_unavailable"] == True:
+            for i in org_sites["results"]:
+                if i["isAvailable"] == True:
+                    temp_sites.append(i)
+        else:
+            temp_sites = org_sites["results"]
         teams_data = {
             "org_id": org_id,
             "org_name": org_name,

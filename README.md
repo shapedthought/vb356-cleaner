@@ -21,9 +21,18 @@ You will need a config.json file with the following:
 ```json
 {
   "username": "administrator@yourdomain.com",
-  "vb365_address": "192.168.0.123"
+  "vb365_address": "192.168.0.123",
+  "remove_unavailable": false,
+  "sync_mode": "PreferLocalResynced"
 }
 ```
+
+Remove Unavailable will remove any sites that are marked in the `/Organizations/{organizationId}/Sites` response as unavailable.
+
+Sync Mode will set the sync mode when getting the data for the current Sites and Teams. The options are:
+
+- PreferLocalResynced
+- Production
 
 The password needs to be set as an environment variable called `VB365_PASSWORD`.
 
